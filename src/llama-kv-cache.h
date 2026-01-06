@@ -217,8 +217,8 @@ private:
 
     bool v_trans = true;  // the value tensor is transposed
 
-    const uint32_t n_seq_max = 1;
-    const uint32_t n_stream  = 1;
+    uint32_t n_seq_max; // [CHAMAN-REC] Removed const hardcode
+    uint32_t n_stream;  // [CHAMAN-REC] Removed const hardcode
 
     // required padding
     const uint32_t n_pad = 1;

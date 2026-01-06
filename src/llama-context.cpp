@@ -2898,7 +2898,7 @@ llama_context_params llama_context_default_params() {
         /*.n_ctx                       =*/ 512,
         /*.n_batch                     =*/ 2048,
         /*.n_ubatch                    =*/ 512,
-        /*.n_seq_max                   =*/ 1,
+        /*.n_seq_max                   =*/ 4,  // [CHAMAN-REC] Changed from 1 to enable parallel branching
         /*.n_threads                   =*/ GGML_DEFAULT_N_THREADS, // TODO: better default
         /*.n_threads_batch             =*/ GGML_DEFAULT_N_THREADS,
         /*.rope_scaling_type           =*/ LLAMA_ROPE_SCALING_TYPE_UNSPECIFIED,

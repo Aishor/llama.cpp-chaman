@@ -740,6 +740,37 @@ ggml_tensor * llm_graph_context::build_cvec(
     return cvec->apply_to(ctx0, cur, il);
 }
 
+ggml_tensor * llm_graph_context::llm_add(ggml_tensor * a, ggml_tensor * b) const {
+    // [CHAMAN-FIX] Orden de Ingeniería #020: Bypass Pre-Cast para IQ4_XS
+    // Si cualquiera de los tensores es IQ4_XS, dequantizamos a F16/F32 antes del ADD
+    // para evitar el crash del kernel CUDA que no soporta tipos cuantizados.
+
+    // Seguridad ante punteros nulos: imitar comportamiento de condicionales en el grafo
+    if (!b) {
+        return a;
+    }
+    if (!a) {
+        return b;
+    }
+
+    // Solo aplicamos si detectamos IQ4_XS
+    // Usamos F16 como "sombra" para balancear precisión y memoria.
+
+    if (a->type == GGML_TYPE_IQ4_XS) {
+        ggml_tensor * temp_a = ggml_new_tensor(ctx0, GGML_TYPE_F16, ggml_n_dims(a), a->ne);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx0, a, temp_a));
+        a = temp_a;
+    }
+
+    if (b->type == GGML_TYPE_IQ4_XS) {
+        ggml_tensor * temp_b = ggml_new_tensor(ctx0, GGML_TYPE_F16, ggml_n_dims(b), b->ne);
+        ggml_build_forward_expand(gf, ggml_cpy(ctx0, b, temp_b));
+        b = temp_b;
+    }
+
+    return llm_add(a, b);
+}
+
 ggml_tensor * llm_graph_context::build_lora_mm(
           ggml_tensor * w,
           ggml_tensor * cur) const {
@@ -760,7 +791,7 @@ ggml_tensor * llm_graph_context::build_lora_mm(
                 );
 
         ab_cur = ggml_scale(ctx0, ab_cur, scale);
-        res = ggml_add(ctx0, res, ab_cur);
+        res = llm_add(res, ab_cur);
     }
 
     return res;
@@ -788,7 +819,7 @@ ggml_tensor * llm_graph_context::build_lora_mm_id(
                 );
 
         ab_cur = ggml_scale(ctx0, ab_cur, scale);
-        res = ggml_add(ctx0, res, ab_cur);
+        res = llm_add(res, ab_cur);
     }
 
     return res;
@@ -823,7 +854,7 @@ ggml_tensor * llm_graph_context::build_norm(
     }
 
     if (mb) {
-        cur = ggml_add(ctx0, cur, mb);
+        cur = llm_add(cur, mb);
     }
 
     return cur;
@@ -848,7 +879,7 @@ ggml_tensor * llm_graph_context::build_ffn(
     cb(tmp, "ffn_up", il);
 
     if (up_b) {
-        tmp = ggml_add(ctx0, tmp, up_b);
+        tmp = llm_add(tmp, up_b);
         cb(tmp, "ffn_up_b", il);
     }
 
@@ -872,7 +903,7 @@ ggml_tensor * llm_graph_context::build_ffn(
         }
 
         if (gate_b) {
-            cur = ggml_add(ctx0, cur, gate_b);
+            cur = llm_add(cur, gate_b);
             cb(cur, "ffn_gate_b", il);
         }
 
@@ -962,7 +993,7 @@ ggml_tensor * llm_graph_context::build_ffn(
     }
 
     if (down_b) {
-        cur = ggml_add(ctx0, cur, down_b);
+        cur = llm_add(cur, down_b);
     }
 
     if (down_s) {
@@ -1042,7 +1073,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     }
 
     if (gate_inp_b) {
-        logits = ggml_add(ctx0, logits, gate_inp_b);
+        logits = llm_add(logits, gate_inp_b);
         cb(logits, "ffn_moe_logits_biased", il);
     }
 
@@ -1069,7 +1100,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     // leave probs unbiased as it's later used to get expert weights
     ggml_tensor * selection_probs = probs;
     if (exp_probs_b != nullptr) {
-        selection_probs = ggml_add(ctx0, probs, exp_probs_b);
+        selection_probs = llm_add(probs, exp_probs_b);
         cb(selection_probs, "ffn_moe_probs_biased", il);
     }
 
@@ -1264,7 +1295,7 @@ ggml_tensor * llm_graph_context::build_moe_ffn(
     ggml_tensor * moe_out = cur_experts[0];
 
     for (uint32_t i = 1; i < hparams.n_expert_used; ++i) {
-        moe_out = ggml_add(ctx0, moe_out, cur_experts[i]);
+        moe_out = llm_add(moe_out, cur_experts[i]);
     }
 
     if (hparams.n_expert_used == 1) {
@@ -1308,7 +1339,7 @@ ggml_tensor * llm_graph_context::build_inp_embd(ggml_tensor * tok_embd) const {
                         ggml_get_rows(ctx0, lw->a, inp->tokens)
                         ), scale);
 
-            cur = ggml_add(ctx0, cur, inpL_delta);
+            cur = llm_add(cur, inpL_delta);
         }
     } else {
         inp->embd = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, n_embd, ubatch.n_tokens);
@@ -1571,7 +1602,7 @@ ggml_tensor * llm_graph_context::build_attn_mha(
         }
 
         if (kq_b) {
-            kq = ggml_add(ctx0, kq, kq_b);
+            kq = llm_add(kq, kq_b);
             cb(kq, "kq_plus_kq_b", il);
         }
 
@@ -1677,7 +1708,7 @@ ggml_tensor * llm_graph_context::build_attn(
     }
 
     if (wo_b) {
-        cur = ggml_add(ctx0, cur, wo_b);
+        cur = llm_add(cur, wo_b);
     }
 
     return cur;
@@ -1767,7 +1798,7 @@ ggml_tensor * llm_graph_context::build_attn(
     }
 
     if (wo_b) {
-        cur = ggml_add(ctx0, cur, wo_b);
+        cur = llm_add(cur, wo_b);
     }
 
     return cur;
@@ -1834,7 +1865,7 @@ ggml_tensor * llm_graph_context::build_attn(
     }
 
     if (wo_b) {
-        cur = ggml_add(ctx0, cur, wo_b);
+        cur = llm_add(cur, wo_b);
     }
 
     return cur;
@@ -1889,7 +1920,7 @@ ggml_tensor * llm_graph_context::build_attn(
     }
 
     if (wo_b) {
-        cur = ggml_add(ctx0, cur, wo_b);
+        cur = llm_add(cur, wo_b);
     }
 
     return cur;
@@ -2140,7 +2171,7 @@ void llm_graph_context::build_pooling(
                 if (cls) {
                     cur = ggml_mul_mat(ctx0, cls, cur);
                     if (cls_b) {
-                        cur = ggml_add(ctx0, cur, cls_b);
+                        cur = llm_add(cur, cls_b);
                     }
                     cur = ggml_tanh(ctx0, cur);
                 }
@@ -2152,7 +2183,7 @@ void llm_graph_context::build_pooling(
                 if (cls_out) {
                     cur = ggml_mul_mat(ctx0, cls_out, cur);
                     if (cls_out_b) {
-                        cur = ggml_add(ctx0, cur, cls_out_b);
+                        cur = llm_add(cur, cls_out_b);
                     }
                 }
 

@@ -676,6 +676,11 @@ struct llm_graph_context {
               ggml_tensor * w,
               ggml_tensor * cur) const;
 
+    // [CHAMAN-FIX] Bypass Pre-Cast for IQ4_XS
+    ggml_tensor * llm_add(
+            ggml_tensor * a,
+            ggml_tensor * b) const;
+
     // do mat_mul_id, while optionally apply lora
     ggml_tensor * build_lora_mm_id(
               ggml_tensor * w,   // ggml_tensor * as
