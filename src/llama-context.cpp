@@ -164,6 +164,9 @@ llama_context::llama_context(
         }
     }
 
+    // [CHAMAN-REC-#021] Save user's n_seq_max intent before any padding
+    const uint32_t n_seq_max_user = cparams.n_seq_max;
+    
     // ref: https://github.com/ggml-org/llama.cpp/pull/17046#discussion_r2503085732
     cparams.n_ctx = GGML_PAD(cparams.n_ctx, 256);
 
@@ -177,9 +180,20 @@ llama_context::llama_context(
             throw std::runtime_error("n_ctx_seq == 0");
         }
 
-        if (cparams.n_ctx != cparams.n_ctx_seq * cparams.n_seq_max) {
-            cparams.n_ctx =  cparams.n_ctx_seq * cparams.n_seq_max;
-            LLAMA_LOG_WARN("%s: n_ctx is not divisible by n_seq_max - rounding down to %u\n", __func__, cparams.n_ctx);
+        // [CHAMAN-REC-#021] Adjust n_ctx to match padding, but NEVER modify n_seq_max
+        uint32_t n_ctx_adjusted = cparams.n_ctx_seq * cparams.n_seq_max;
+        
+        if (cparams.n_ctx != n_ctx_adjusted) {
+            LLAMA_LOG_WARN("%s: [CHAMAN-REC-#021] n_ctx adjusted %u -> %u to honor n_seq_max=%u (n_ctx_seq=%u)\n", 
+                __func__, cparams.n_ctx, n_ctx_adjusted, cparams.n_seq_max, cparams.n_ctx_seq);
+            cparams.n_ctx = n_ctx_adjusted;
+        }
+        
+        // [CHAMAN-REC-#021] Verify n_seq_max was not accidentally modified
+        if (cparams.n_seq_max != n_seq_max_user) {
+            LLAMA_LOG_ERROR("%s: [CHAMAN-REC-#021] CRITICAL: n_seq_max modified! user=%u, current=%u\n",
+                __func__, n_seq_max_user, cparams.n_seq_max);
+            cparams.n_seq_max = n_seq_max_user;  // Force restore user intent
         }
     }
 
